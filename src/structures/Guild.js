@@ -74,6 +74,21 @@ class Guild extends Base {
       this._patch(data);
       if (!data.channels) this.available = false;
     }
+
+    /**
+     * The id of the shard this Guild belongs to.
+     * @type {number}
+     */
+    this.shardID = data.shardID;
+  }
+
+  /**
+   * The Shard this Guild belongs to.
+   * @type {WebSocketShard}
+   * @readonly
+   */
+  get shard() {
+    return this.client.ws.shards.get(this.shardID);
   }
 
   /* eslint-disable complexity */
@@ -435,7 +450,7 @@ class Guild extends Base {
 
   /**
    * Creates an integration by attaching an integration object
-   * @param {IntegrationData} data The data for thes integration
+   * @param {IntegrationData} data The data for the integration
    * @param {string} reason Reason for creating the integration
    * @returns {Promise<Guild>}
    */
