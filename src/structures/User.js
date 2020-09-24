@@ -1,10 +1,12 @@
 'use strict';
 
-const TextBasedChannel = require('./interfaces/TextBasedChannel');
-const { Presence } = require('./Presence');
-const Snowflake = require('../util/Snowflake');
 const Base = require('./Base');
+const TextBasedChannel = require('./interfaces/TextBasedChannel');
 const { Error } = require('../errors');
+const Snowflake = require('../util/Snowflake');
+const UserFlags = require('../util/UserFlags');
+
+let Structures;
 
 /**
  * Represents a user on Discord.
@@ -12,6 +14,10 @@ const { Error } = require('../errors');
  * @extends {Base}
  */
 class User extends Base {
+  /**
+   * @param {Client} client The instantiating client
+   * @param {Object} data The data for the user
+   */
   constructor(client, data) {
     super(client);
 
@@ -21,6 +27,21 @@ class User extends Base {
      */
     this.id = data.id;
 
+    this._patch(data);
+  }
+
+  _patch(data) {
+    if ('username' in data) {
+      /**
+       * The username of the user
+       * @type {?string}
+       * @name User#username
+       */
+      this.username = data.username;
+    } else if (typeof this.username !== 'string') {
+      this.username = null;
+    }
+
     /**
      * Whether or not the user is a bot
      * @type {boolean}
@@ -28,37 +49,54 @@ class User extends Base {
      */
     this.bot = Boolean(data.bot);
 
-    this._patch(data);
-  }
+    if ('discriminator' in data) {
+      /**
+       * A discriminator based on username for the user
+       * @type {?string}
+       * @name User#discriminator
+       */
+      this.discriminator = data.discriminator;
+    } else if (typeof this.discriminator !== 'string') {
+      this.discriminator = null;
+    }
 
-  _patch(data) {
-    /**
-     * The username of the user
-     * @type {string}
-     * @name User#username
-     */
-    if (data.username) this.username = data.username;
+    if ('avatar' in data) {
+      /**
+       * The ID of the user's avatar
+       * @type {?string}
+       * @name User#avatar
+       */
+      this.avatar = data.avatar;
+    } else if (typeof this.avatar !== 'string') {
+      this.avatar = null;
+    }
 
-    /**
-     * A discriminator based on username for the user
-     * @type {string}
-     * @name User#discriminator
-     */
-    if (data.discriminator) this.discriminator = data.discriminator;
+    if ('system' in data) {
+      /**
+       * Whether the user is an Official Discord System user (part of the urgent message system)
+       * @type {?boolean}
+       * @name User#system
+       */
+      this.system = Boolean(data.system);
+    }
 
-    /**
-     * The ID of the user's avatar
-     * @type {?string}
-     * @name User#avatar
-     */
-    if (typeof data.avatar !== 'undefined') this.avatar = data.avatar;
+    if ('locale' in data) {
+      /**
+       * The locale of the user's client (ISO 639-1)
+       * @type {?string}
+       * @name User#locale
+       */
+      this.locale = data.locale;
+    }
 
-    /**
-     * The locale of the user's client (ISO 639-1)
-     * @type {?string}
-     * @name User#locale
-     */
-    if (data.locale) this.locale = data.locale;
+    if ('public_flags' in data) {
+      /**
+       * The flags for this user
+       * @type {?UserFlags}
+       * @name User#flags
+       */
+      this.flags = new UserFlags(data.public_flags);
+    }
 
     /**
      * The ID of the last message sent by the user, if one was sent
@@ -71,6 +109,15 @@ class User extends Base {
      * @type {?Snowflake}
      */
     this.lastMessageChannelID = null;
+  }
+
+  /**
+   * Whether this User is a partial
+   * @type {boolean}
+   * @readonly
+   */
+  get partial() {
+    return typeof this.username !== 'string';
   }
 
   /**
@@ -97,8 +144,8 @@ class User extends Base {
    * @readonly
    */
   get lastMessage() {
-    const channel = this.client.channels.get(this.lastMessageChannelID);
-    return (channel && channel.messages.get(this.lastMessageID)) || null;
+    const channel = this.client.channels.cache.get(this.lastMessageChannelID);
+    return (channel && channel.messages.cache.get(this.lastMessageID)) || null;
   }
 
   /**
@@ -107,9 +154,11 @@ class User extends Base {
    * @readonly
    */
   get presence() {
-    for (const guild of this.client.guilds.values()) {
-      if (guild.presences.has(this.id)) return guild.presences.get(this.id);
+    for (const guild of this.client.guilds.cache.values()) {
+      if (guild.presences.cache.has(this.id)) return guild.presences.cache.get(this.id);
     }
+    if (!Structures) Structures = require('../util/Structures');
+    const Presence = Structures.get('Presence');
     return new Presence(this.client, { user: { id: this.id } });
   }
 
@@ -118,9 +167,9 @@ class User extends Base {
    * @param {ImageURLOptions} [options={}] Options for the Image URL
    * @returns {?string}
    */
-  avatarURL({ format, size } = {}) {
+  avatarURL({ format, size, dynamic } = {}) {
     if (!this.avatar) return null;
-    return this.client.rest.cdn.Avatar(this.id, this.avatar, format, size);
+    return this.client.rest.cdn.Avatar(this.id, this.avatar, format, size, dynamic);
   }
 
   /**
@@ -144,11 +193,11 @@ class User extends Base {
 
   /**
    * The Discord "tag" (e.g. `hydrabolt#0001`) for this user
-   * @type {string}
+   * @type {?string}
    * @readonly
    */
   get tag() {
-    return `${this.username}#${this.discriminator}`;
+    return typeof this.username === 'string' ? `${this.username}#${this.discriminator}` : null;
   }
 
   /**
@@ -187,29 +236,37 @@ class User extends Base {
    * @readonly
    */
   get dmChannel() {
-    return this.client.channels.find(c => c.type === 'dm' && c.recipient.id === this.id) || null;
+    return this.client.channels.cache.find(c => c.type === 'dm' && c.recipient.id === this.id) || null;
   }
 
   /**
    * Creates a DM channel between the client and the user.
+   * @param {boolean} [force=false] Whether to skip the cache check and request the API
    * @returns {Promise<DMChannel>}
    */
-  createDM() {
-    if (this.dmChannel) return Promise.resolve(this.dmChannel);
-    return this.client.api.users(this.client.user.id).channels.post({ data: {
-      recipient_id: this.id,
-    } })
-      .then(data => this.client.actions.ChannelCreate.handle(data).channel);
+  async createDM(force = false) {
+    if (!force) {
+      const { dmChannel } = this;
+      if (dmChannel && !dmChannel.partial) return dmChannel;
+    }
+
+    const data = await this.client.api.users(this.client.user.id).channels.post({
+      data: {
+        recipient_id: this.id,
+      },
+    });
+    return this.client.actions.ChannelCreate.handle(data).channel;
   }
 
   /**
    * Deletes a DM channel (if one exists) between the client and the user. Resolves with the channel if successful.
    * @returns {Promise<DMChannel>}
    */
-  deleteDM() {
-    if (!this.dmChannel) return Promise.reject(new Error('USER_NO_DMCHANNEL'));
-    return this.client.api.channels(this.dmChannel.id).delete()
-      .then(data => this.client.actions.ChannelDelete.handle(data).channel);
+  async deleteDM() {
+    const { dmChannel } = this;
+    if (!dmChannel) throw new Error('USER_NO_DMCHANNEL');
+    const data = await this.client.api.channels(dmChannel.id).delete();
+    return this.client.actions.ChannelDelete.handle(data).channel;
   }
 
   /**
@@ -219,13 +276,35 @@ class User extends Base {
    * @returns {boolean}
    */
   equals(user) {
-    let equal = user &&
+    let equal =
+      user &&
       this.id === user.id &&
       this.username === user.username &&
       this.discriminator === user.discriminator &&
       this.avatar === user.avatar;
 
     return equal;
+  }
+
+  /**
+   * Fetches this user's flags.
+   * @param {boolean} [force=false] Whether to skip the cache check and request the AP
+   * @returns {Promise<UserFlags>}
+   */
+  async fetchFlags(force = false) {
+    if (this.flags && !force) return this.flags;
+    const data = await this.client.api.users(this.id).get();
+    this._patch(data);
+    return this.flags;
+  }
+
+  /**
+   * Fetches this user.
+   * @param {boolean} [force=false] Whether to skip the cache check and request the AP
+   * @returns {Promise<User>}
+   */
+  fetch(force = false) {
+    return this.client.users.fetch(this.id, true, force);
   }
 
   /**
@@ -240,13 +319,16 @@ class User extends Base {
   }
 
   toJSON(...props) {
-    const json = super.toJSON({
-      createdTimestamp: true,
-      defaultAvatarURL: true,
-      tag: true,
-      lastMessage: false,
-      lastMessageID: false,
-    }, ...props);
+    const json = super.toJSON(
+      {
+        createdTimestamp: true,
+        defaultAvatarURL: true,
+        tag: true,
+        lastMessage: false,
+        lastMessageID: false,
+      },
+      ...props,
+    );
     json.avatarURL = this.avatarURL();
     json.displayAvatarURL = this.displayAvatarURL();
     return json;

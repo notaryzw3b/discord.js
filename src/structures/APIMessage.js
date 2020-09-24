@@ -1,11 +1,12 @@
 'use strict';
 
-const DataResolver = require('../util/DataResolver');
-const MessageEmbed = require('./MessageEmbed');
 const MessageAttachment = require('./MessageAttachment');
-const { browser } = require('../util/Constants');
-const Util = require('../util/Util');
+const MessageEmbed = require('./MessageEmbed');
 const { RangeError } = require('../errors');
+const { browser } = require('../util/Constants');
+const DataResolver = require('../util/DataResolver');
+const MessageFlags = require('../util/MessageFlags');
+const Util = require('../util/Util');
 
 /**
  * Represents a message to be sent to the API.
@@ -64,14 +65,47 @@ class APIMessage {
   }
 
   /**
-   * Makes the content of this message.
-   * @returns {string|string[]}
+   * Whether or not the target is a message
+   * @type {boolean}
+   * @readonly
    */
-  makeContent() { // eslint-disable-line complexity
+  get isMessage() {
+    const Message = require('./Message');
+    return this.target instanceof Message;
+  }
+
+  /**
+   * Makes the content of this message.
+   * @returns {?(string|string[])}
+   */
+  makeContent() {
     const GuildMember = require('./GuildMember');
 
-    // eslint-disable-next-line eqeqeq
-    let content = Util.resolveString(this.options.content == null ? '' : this.options.content);
+    let content;
+    if (this.options.content === null) {
+      content = '';
+    } else if (typeof this.options.content !== 'undefined') {
+      content = Util.resolveString(this.options.content);
+    }
+
+    if (typeof content !== 'string') return content;
+
+    const disableMentions =
+      typeof this.options.disableMentions === 'undefined'
+        ? this.target.client.options.disableMentions
+        : this.options.disableMentions;
+    if (disableMentions === 'all') {
+      content = Util.removeMentions(content);
+    } else if (disableMentions === 'everyone') {
+      content = content.replace(/@([^<>@ ]*)/gmsu, (match, target) => {
+        if (target.match(/^[&!]?\d+$/)) {
+          return `@${target}`;
+        } else {
+          return `@\u200b${target}`;
+        }
+      });
+    }
+
     const isSplit = typeof this.options.split !== 'undefined' && this.options.split !== false;
     const isCode = typeof this.options.code !== 'undefined' && this.options.code !== false;
     const splitOptions = isSplit ? { ...this.options.split } : undefined;
@@ -88,20 +122,13 @@ class APIMessage {
     if (content || mentionPart) {
       if (isCode) {
         const codeName = typeof this.options.code === 'string' ? this.options.code : '';
-        content = `${mentionPart}\`\`\`${codeName}\n${Util.escapeMarkdown(content, true)}\n\`\`\``;
+        content = `${mentionPart}\`\`\`${codeName}\n${Util.cleanCodeBlockContent(content)}\n\`\`\``;
         if (isSplit) {
           splitOptions.prepend = `${splitOptions.prepend || ''}\`\`\`${codeName}\n`;
           splitOptions.append = `\n\`\`\`${splitOptions.append || ''}`;
         }
       } else if (mentionPart) {
         content = `${mentionPart}${content}`;
-      }
-
-      const disableEveryone = typeof this.options.disableEveryone === 'undefined' ?
-        this.target.client.options.disableEveryone :
-        this.options.disableEveryone;
-      if (disableEveryone) {
-        content = content.replace(/@(everyone|here)/g, '@\u200b$1');
       }
 
       if (isSplit) {
@@ -121,6 +148,7 @@ class APIMessage {
 
     const content = this.makeContent();
     const tts = Boolean(this.options.tts);
+
     let nonce;
     if (typeof this.options.nonce !== 'undefined') {
       nonce = parseInt(this.options.nonce);
@@ -135,13 +163,39 @@ class APIMessage {
     } else if (this.options.embed) {
       embedLikes.push(this.options.embed);
     }
-    const embeds = embedLikes.map(e => new MessageEmbed(e)._apiTransform());
+    const embeds = embedLikes.map(e => new MessageEmbed(e).toJSON());
 
     let username;
     let avatarURL;
     if (this.isWebhook) {
       username = this.options.username || this.target.name;
       if (this.options.avatarURL) avatarURL = this.options.avatarURL;
+    }
+
+    let flags;
+    if (this.isMessage) {
+      // eslint-disable-next-line eqeqeq
+      flags = this.options.flags != null ? new MessageFlags(this.options.flags).bitfield : this.target.flags.bitfield;
+    }
+
+    let allowedMentions =
+      typeof this.options.allowedMentions === 'undefined'
+        ? this.target.client.options.allowedMentions
+        : this.options.allowedMentions;
+    if (this.options.reply) {
+      const id = this.target.client.users.resolveID(this.options.reply);
+      if (allowedMentions) {
+        // Clone the object as not to alter the ClientOptions object
+        allowedMentions = Util.cloneObject(allowedMentions);
+        const parsed = allowedMentions.parse && allowedMentions.parse.includes('users');
+        // Check if the mention won't be parsed, and isn't supplied in `users`
+        if (!parsed && !(allowedMentions.users && allowedMentions.users.includes(id))) {
+          if (!allowedMentions.users) allowedMentions.users = [];
+          allowedMentions.users.push(id);
+        }
+      } else {
+        allowedMentions = { users: [id] };
+      }
     }
 
     this.data = {
@@ -152,6 +206,8 @@ class APIMessage {
       embeds,
       username,
       avatar_url: avatarURL,
+      allowed_mentions: typeof content === 'undefined' ? undefined : allowedMentions,
+      flags,
     };
     return this;
   }
@@ -193,7 +249,7 @@ class APIMessage {
   split() {
     if (!this.data) this.resolveData();
 
-    if (!(this.data.content instanceof Array)) return [this];
+    if (!Array.isArray(this.data.content)) return [this];
 
     const apiMessages = [];
 
@@ -205,8 +261,8 @@ class APIMessage {
         data = { ...this.data, content: this.data.content[i] };
         opt = { ...this.options, content: this.data.content[i] };
       } else {
-        data = { content: this.data.content[i], tts: this.data.tts };
-        opt = { content: this.data.content[i], tts: this.data.tts };
+        data = { content: this.data.content[i], tts: this.data.tts, allowed_mentions: this.options.allowedMentions };
+        opt = { content: this.data.content[i], tts: this.data.tts, allowedMentions: this.options.allowedMentions };
       }
 
       const apiMessage = new APIMessage(this.target, opt);
@@ -238,7 +294,8 @@ class APIMessage {
       return 'file.jpg';
     };
 
-    const ownAttachment = typeof fileLike === 'string' ||
+    const ownAttachment =
+      typeof fileLike === 'string' ||
       fileLike instanceof (browser ? ArrayBuffer : Buffer) ||
       typeof fileLike.pipe === 'function';
     if (ownAttachment) {
@@ -275,16 +332,16 @@ class APIMessage {
   /**
    * Transforms the user-level arguments into a final options object. Passing a transformed options object alone into
    * this method will keep it the same, allowing for the reuse of the final options object.
-   * @param {StringResolvable} [content=''] Content to send
+   * @param {StringResolvable} [content] Content to send
    * @param {MessageOptions|WebhookMessageOptions|MessageAdditions} [options={}] Options to use
    * @param {MessageOptions|WebhookMessageOptions} [extra={}] Extra options to add onto transformed options
    * @param {boolean} [isWebhook=false] Whether or not to use WebhookMessageOptions as the result
    * @returns {MessageOptions|WebhookMessageOptions}
    */
   static transformOptions(content, options, extra = {}, isWebhook = false) {
-    if (!options && typeof content === 'object' && !(content instanceof Array)) {
+    if (!options && typeof content === 'object' && !Array.isArray(content)) {
       options = content;
-      content = '';
+      content = undefined;
     }
 
     if (!options) {
@@ -295,10 +352,10 @@ class APIMessage {
       return { content, files: [options], ...extra };
     }
 
-    if (options instanceof Array) {
+    if (Array.isArray(options)) {
       const [embeds, files] = this.partitionMessageAdditions(options);
       return isWebhook ? { content, embeds, files, ...extra } : { content, embed: embeds[0], files, ...extra };
-    } else if (content instanceof Array) {
+    } else if (Array.isArray(content)) {
       const [embeds, files] = this.partitionMessageAdditions(content);
       if (embeds.length || files.length) {
         return isWebhook ? { embeds, files, ...extra } : { embed: embeds[0], files, ...extra };
@@ -311,7 +368,7 @@ class APIMessage {
   /**
    * Creates an `APIMessage` from user-level arguments.
    * @param {MessageTarget} target Target to send to
-   * @param {StringResolvable} [content=''] Content to send
+   * @param {StringResolvable} [content] Content to send
    * @param {MessageOptions|WebhookMessageOptions|MessageAdditions} [options={}] Options to use
    * @param {MessageOptions|WebhookMessageOptions} [extra={}] - Extra options to add onto transformed options
    * @returns {MessageOptions|WebhookMessageOptions}
@@ -330,7 +387,7 @@ module.exports = APIMessage;
 
 /**
  * A target for a message.
- * @typedef {TextChannel|DMChannel|GroupDMChannel|User|GuildMember|Webhook|WebhookClient} MessageTarget
+ * @typedef {TextChannel|DMChannel|User|GuildMember|Webhook|WebhookClient} MessageTarget
  */
 
 /**

@@ -10,6 +10,13 @@ const BitField = require('./BitField');
  */
 class Permissions extends BitField {
   /**
+   * @name Permissions
+   * @kind constructor
+   * @memberof Permissions
+   * @param {PermissionResolvable} [bits=0] Bit(s) to read from
+   */
+
+  /**
    * Data that can be resolved to give a permission number. This can be:
    * * A string (see {@link Permissions.FLAGS})
    * * A permission number
@@ -19,14 +26,23 @@ class Permissions extends BitField {
    */
 
   /**
+   * Checks whether the bitfield has a permission, or any of multiple permissions.
+   * @param {PermissionResolvable} permission Permission(s) to check for
+   * @param {boolean} [checkAdmin=true] Whether to allow the administrator permission to override
+   * @returns {boolean}
+   */
+  any(permission, checkAdmin = true) {
+    return (checkAdmin && super.has(this.constructor.FLAGS.ADMINISTRATOR)) || super.any(permission);
+  }
+
+  /**
    * Checks whether the bitfield has a permission, or multiple permissions.
    * @param {PermissionResolvable} permission Permission(s) to check for
    * @param {boolean} [checkAdmin=true] Whether to allow the administrator permission to override
    * @returns {boolean}
    */
   has(permission, checkAdmin = true) {
-    if (checkAdmin && super.has(this.constructor.FLAGS.ADMINISTRATOR)) return true;
-    return super.has(permission);
+    return (checkAdmin && super.has(this.constructor.FLAGS.ADMINISTRATOR)) || super.has(permission);
   }
 }
 
@@ -41,6 +57,7 @@ class Permissions extends BitField {
  * * `ADD_REACTIONS` (add new reactions to messages)
  * * `VIEW_AUDIT_LOG`
  * * `PRIORITY_SPEAKER`
+ * * `STREAM`
  * * `VIEW_CHANNEL`
  * * `SEND_MESSAGES`
  * * `SEND_TTS_MESSAGES`
@@ -50,6 +67,7 @@ class Permissions extends BitField {
  * * `READ_MESSAGE_HISTORY` (view messages that were posted prior to opening Discord)
  * * `MENTION_EVERYONE`
  * * `USE_EXTERNAL_EMOJIS` (use emojis from different guilds)
+ * * `VIEW_GUILD_INSIGHTS`
  * * `CONNECT` (connect to a voice channel)
  * * `SPEAK` (speak in a voice channel)
  * * `MUTE_MEMBERS` (mute members across all voice channels)
@@ -62,7 +80,7 @@ class Permissions extends BitField {
  * * `MANAGE_WEBHOOKS`
  * * `MANAGE_EMOJIS`
  * @type {Object}
- * @see {@link https://discordapp.com/developers/docs/topics/permissions}
+ * @see {@link https://discord.com/developers/docs/topics/permissions}
  */
 Permissions.FLAGS = {
   CREATE_INSTANT_INVITE: 1 << 0,
@@ -74,7 +92,7 @@ Permissions.FLAGS = {
   ADD_REACTIONS: 1 << 6,
   VIEW_AUDIT_LOG: 1 << 7,
   PRIORITY_SPEAKER: 1 << 8,
-
+  STREAM: 1 << 9,
   VIEW_CHANNEL: 1 << 10,
   SEND_MESSAGES: 1 << 11,
   SEND_TTS_MESSAGES: 1 << 12,
@@ -84,14 +102,13 @@ Permissions.FLAGS = {
   READ_MESSAGE_HISTORY: 1 << 16,
   MENTION_EVERYONE: 1 << 17,
   USE_EXTERNAL_EMOJIS: 1 << 18,
-
+  VIEW_GUILD_INSIGHTS: 1 << 19,
   CONNECT: 1 << 20,
   SPEAK: 1 << 21,
   MUTE_MEMBERS: 1 << 22,
   DEAFEN_MEMBERS: 1 << 23,
   MOVE_MEMBERS: 1 << 24,
   USE_VAD: 1 << 25,
-
   CHANGE_NICKNAME: 1 << 26,
   MANAGE_NICKNAMES: 1 << 27,
   MANAGE_ROLES: 1 << 28,
@@ -109,6 +126,6 @@ Permissions.ALL = Object.values(Permissions.FLAGS).reduce((all, p) => all | p, 0
  * Bitfield representing the default permissions for users
  * @type {number}
  */
-Permissions.DEFAULT = 104324097;
+Permissions.DEFAULT = 104324673;
 
 module.exports = Permissions;

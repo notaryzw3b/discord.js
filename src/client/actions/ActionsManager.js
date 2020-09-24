@@ -11,11 +11,14 @@ class ActionsManager {
     this.register(require('./MessageReactionAdd'));
     this.register(require('./MessageReactionRemove'));
     this.register(require('./MessageReactionRemoveAll'));
+    this.register(require('./MessageReactionRemoveEmoji'));
     this.register(require('./ChannelCreate'));
     this.register(require('./ChannelDelete'));
     this.register(require('./ChannelUpdate'));
     this.register(require('./GuildDelete'));
     this.register(require('./GuildUpdate'));
+    this.register(require('./InviteCreate'));
+    this.register(require('./InviteDelete'));
     this.register(require('./GuildMemberRemove'));
     this.register(require('./GuildBanRemove'));
     this.register(require('./GuildRoleCreate'));
@@ -32,6 +35,7 @@ class ActionsManager {
     this.register(require('./GuildChannelsPositionUpdate'));
     this.register(require('./GuildIntegrationsUpdate'));
     this.register(require('./WebhooksUpdate'));
+    this.register(require('./TypingStart'));
   }
 
   register(Action) {

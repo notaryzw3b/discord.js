@@ -6,13 +6,12 @@ const { Events } = require('../../util/Constants');
 class MessageDeleteAction extends Action {
   handle(data) {
     const client = this.client;
-    const channel = client.channels.get(data.channel_id);
+    const channel = this.getChannel(data);
     let message;
-
     if (channel) {
-      message = channel.messages.get(data.id);
+      message = this.getMessage(data, channel);
       if (message) {
-        channel.messages.delete(message.id);
+        channel.messages.cache.delete(message.id);
         message.deleted = true;
         /**
          * Emitted whenever a message is deleted.
@@ -26,6 +25,5 @@ class MessageDeleteAction extends Action {
     return { message };
   }
 }
-
 
 module.exports = MessageDeleteAction;
